@@ -1,60 +1,59 @@
 from flask import Flask, render_template, request
-import pandas as pd
 import pickle
-
-# Load model, encoders, and scaler
-with open('best_model.pkl', 'rb') as model_file:
-    loaded_model = pickle.load(model_file)
-with open('encoder.pkl', 'rb') as encoders_file:
-    encoders = pickle.load(encoders_file)
-with open('scaler.pkl', 'rb') as scaler_file:
-    scaler_data = pickle.load(scaler_file)
+import pandas as pd
 
 app = Flask(__name__)
 
-def make_prediction(input_data):
-    input_df = pd.DataFrame([input_data])
+# Load model
+with open('model_1.pkl', 'rb') as f:
+    model = pickle.load(f)
 
-    for col, encoder in encoders.items():
-        input_df[col] = encoder.transform(input_df[col])
+# Load LabelEncoder dictionary
+with open('encoders_1.pkl', 'rb') as f:
+    encoders = pickle.load(f)
 
-    numerical_cols = ['tenure', 'MonthlyCharges']
-    input_df[numerical_cols] = scaler_data.transform(input_df[numerical_cols])
+# Columns in the same order as model training
+feature_columns = [
+    'Time_spent_Alone', 'Stage_fear', 'Social_event_attendance',
+    'Going_outside', 'Drained_after_socializing',
+    'Friends_circle_size', 'Post_frequency'
+]
 
-    prediction = loaded_model.predict(input_df)[0]
-    probability = loaded_model.predict_proba(input_df)[0, 1]
-    return "Churn" if prediction == 1 else "No Churn", probability
+# Separate numeric and categorical columns
+numeric_cols = ['Time_spent_Alone', 'Going_outside', 'Social_event_attendance', 
+                'Friends_circle_size', 'Post_frequency']
+categorical_cols = [col for col in feature_columns if col not in numeric_cols]
 
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    prediction = None
-    probability = None
-    if request.method == 'POST':
-        input_data = {
-            'gender': request.form['gender'],
-            'SeniorCitizen': int(request.form['SeniorCitizen']),
-            'Partner': request.form['Partner'],
-            'Dependents': request.form['Dependents'],
-            'tenure': int(request.form['tenure']),
-            'PhoneService': request.form['PhoneService'],
-            'MultipleLines': request.form['MultipleLines'],
-            'InternetService': request.form['InternetService'],
-            'OnlineSecurity': request.form['OnlineSecurity'],
-            'OnlineBackup': request.form['OnlineBackup'],
-            'DeviceProtection': request.form['DeviceProtection'],
-            'TechSupport': request.form['TechSupport'],
-            'StreamingTV': request.form['StreamingTV'],
-            'StreamingMovies': request.form['StreamingMovies'],
-            'Contract': request.form['Contract'],
-            'PaperlessBilling': request.form['PaperlessBilling'],
-            'PaymentMethod': request.form['PaymentMethod'],
-            'MonthlyCharges': float(request.form['MonthlyCharges']),
-            
-        }
+# Function to encode categorical columns
+def encode_feature(col_name, value):
+    le = encoders[col_name]
+    if value in le.classes_:
+        return le.transform([value])[0]
+    else:
+        return le.transform([le.classes_[0]])[0]  # most frequent class
 
-        prediction, probability = make_prediction(input_data)
+@app.route('/')
+def home():
+    return render_template('index.html')
 
-    return render_template('index.html', prediction=prediction, probability=probability)
+@app.route('/predict', methods=['POST'])
+def predict():
+    try:
+        features = []
+        for col in feature_columns:
+            val = request.form[col]
+            if col in numeric_cols:
+                features.append(int(val))
+            else:
+                features.append(encode_feature(col, val))
 
-if __name__ == '__main__':
+        input_df = pd.DataFrame([features], columns=feature_columns)
+        prediction = model.predict(input_df)[0]
+        result = "🌙 The person is Introvert " if prediction == 1 else "😎The person is Extrovert"
+
+        return render_template('index.html', prediction_text=result)
+    except Exception as e:
+        return render_template('index.html', prediction_text=f"Error: {str(e)}")
+
+if __name__ == "__main__":
     app.run(debug=True)
